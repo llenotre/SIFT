@@ -21,6 +21,18 @@ fn gaussian_filter(x: f32, y: f32, sigma: f32) -> f32 {
 	(-(x * x + y * y) / b).exp() / a
 }
 
+#[inline(always)]
+fn clamp(n: f32, min: f32, max: f32) -> f32 {
+	if n < min {
+		min
+	} else if n > max {
+		max
+	} else {
+		n
+	}
+}
+
+#[inline(always)]
 fn color_to_vector(color: &Rgba<u8>) -> Vector::<f32> {
 	Vector::<f32>::from_vec(vec![
 		color[0] as f32 / 255.,
@@ -29,18 +41,22 @@ fn color_to_vector(color: &Rgba<u8>) -> Vector::<f32> {
 	])
 }
 
+#[inline(always)]
 fn vector_to_color(vector: &Vector::<f32>) -> Rgba<u8> {
 	Rgba([
-		(vector.x() * 255.) as _,
-		(vector.y() * 255.) as _,
-		(vector.z() * 255.) as _,
+		(clamp(*vector.x(), 0., 1.) * 255.) as _,
+		(clamp(*vector.y(), 0., 1.) * 255.) as _,
+		(clamp(*vector.z(), 0., 1.) * 255.) as _,
+		//(*vector.x() * 255.) as _,
+		//(*vector.y() * 255.) as _,
+		//(*vector.z() * 255.) as _,
 		255
 	])
 }
 
-fn get_gradient(img: &DynamicImage, sigma: f32) -> DynamicImage {
-	let mut gradient = DynamicImage::new_rgb8(img.width(), img.height());
-	let radius = sigma as i32;
+fn difference_of_gaussian(img: &DynamicImage, sigma: f32, k: f32) -> DynamicImage {
+	let mut result = DynamicImage::new_rgb8(img.width(), img.height());
+	let radius = max((sigma * sigma) as i32, ((k * sigma) * (k * sigma)) as i32);
 
 	for x in 0..img.width() {
 		for y in 0..img.height() {
@@ -56,26 +72,12 @@ fn get_gradient(img: &DynamicImage, sigma: f32) -> DynamicImage {
 					}
 
 					let pixel_color = img.get_pixel((x as i32 + i) as _, (y as i32 + j) as _);
-					color += color_to_vector(&pixel_color)
-						* gaussian_filter(i as _, j as _, sigma);
+					let gauss = gaussian_filter(i as _, j as _, k * sigma)
+						- gaussian_filter(i as _, j as _, sigma);
+					color += color_to_vector(&pixel_color) * gauss;
 				}
 			}
 
-			gradient.put_pixel(x, y, vector_to_color(&color));
-		}
-	}
-
-	gradient
-}
-
-fn difference_of_gaussian(img: &DynamicImage, sigma: f32, k: f32) -> DynamicImage {
-	let a = get_gradient(img, k * sigma);
-	let b = get_gradient(img, sigma);
-	let mut result = DynamicImage::new_rgb8(img.width(), img.height());
-
-	for x in 0..img.width() {
-		for y in 0..img.height() {
-			let color = color_to_vector(&a.get_pixel(x, y)) - color_to_vector(&b.get_pixel(x, y));
 			result.put_pixel(x, y, vector_to_color(&color));
 		}
 	}
@@ -118,12 +120,15 @@ fn main() {
 			std::process::exit(1);
 		}
 
-		let img = difference_of_gaussian(&img_result.unwrap(), 20., 10.);
+		let img = img_result.unwrap();
+		//let img_pre = img.resize(400, 300, imageops::FilterType::Triangle); // TODO Remove
+		let img_pre = img;
+		let img_post = difference_of_gaussian(&img_pre, 3., 0.5);
 		let y = height;
-		width = max(width, img.width() as usize);
-		height += img.height() as usize;
+		width = max(width, img_post.width() as usize);
+		height += img_post.height() as usize;
 
-		images.push((img, y));
+		images.push((img_post, y));
 	}
 
 	let mut final_image = DynamicImage::new_rgb8(width as _, height as _);
